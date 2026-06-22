@@ -1,65 +1,68 @@
-import Image from "next/image";
+import Link from 'next/link';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { OriginButton } from '@/components/ui/origin-button';
+import { LampContainer } from '@/components/ui/lamp';
+import { LogoTyping } from '@/components/LogoTyping';
 
-export default function Home() {
+const PROMPTS = [
+  "What made you pause today?",
+  "Describe a texture you noticed.",
+  "What sound stayed with you?",
+  "Who surprised you today, and how?",
+  "What did the light look like this morning?",
+  "Name something small that brought comfort.",
+  "What were you thinking about on your commute?",
+  "Describe a moment you wanted to hold onto.",
+  "What conversation lingered in your mind?",
+  "What do you wish you'd said differently?",
+];
+
+function getDayOfYear(): number {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  return Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export default function HomePage() {
+  const today = new Date();
+  const prompt = PROMPTS[getDayOfYear() % PROMPTS.length];
+  const day = today.toLocaleDateString('en-US', { weekday: 'long' });
+  const date = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen flex flex-col" style={{ background: 'var(--bg)', transition: 'background 0.3s' }}>
+      {/* Nav */}
+      <nav className="glass fixed top-0 left-0 right-0 z-20 px-8 h-14 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+        <LogoTyping />
+        <ThemeToggle />
+      </nav>
+
+      <LampContainer className="flex-1">
+        <div className="text-center max-w-xl w-full">
+          <p className="text-xs uppercase tracking-widest font-medium mb-2" style={{ color: 'var(--fg-tertiary)' }}>
+            {day}
           </p>
+          <h1 className="font-display font-semibold mb-6" style={{ fontSize: 'clamp(28px, 4vw, 48px)', color: 'var(--fg)', letterSpacing: '-0.03em' }}>
+            {date}
+          </h1>
+
+          <p className="text-xs uppercase tracking-widest font-medium mb-2" style={{ color: 'var(--fg-tertiary)' }}>
+            A thought, if you need one
+          </p>
+          <p className="font-display text-2xl leading-snug mb-2" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>
+            {prompt}
+          </p>
+          <p className="text-sm mb-8" style={{ color: 'var(--fg-secondary)' }}>
+            Or just write whatever&apos;s on your mind.
+          </p>
+
+          <div className="flex justify-center">
+            <Link href="/write">
+              <OriginButton>Write today&apos;s entry</OriginButton>
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </LampContainer>
+    </main>
   );
 }
