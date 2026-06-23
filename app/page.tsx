@@ -1,9 +1,7 @@
-import Link from 'next/link';
-import { createClient } from '@supabase/supabase-js';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { OriginButton } from '@/components/ui/origin-button';
 import { LampContainer } from '@/components/ui/lamp';
 import { LogoTyping } from '@/components/LogoTyping';
+import { WriteButton } from '@/components/WriteButton';
 
 const PROMPTS = [
   "What made you pause today?",
@@ -24,27 +22,11 @@ function getDayOfYear(): number {
   return Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-async function hasEntryToday(): Promise<boolean> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const today = new Date().toISOString().slice(0, 10);
-  const { data } = await supabase
-    .from('daylists')
-    .select('id')
-    .gte('created_at', `${today}T00:00:00.000Z`)
-    .lte('created_at', `${today}T23:59:59.999Z`)
-    .limit(1);
-  return (data?.length ?? 0) > 0;
-}
-
-export default async function HomePage() {
+export default function HomePage() {
   const today = new Date();
   const prompt = PROMPTS[getDayOfYear() % PROMPTS.length];
   const day = today.toLocaleDateString('en-US', { weekday: 'long' });
   const date = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const writtenToday = await hasEntryToday();
 
   return (
     <main className="min-h-screen flex flex-col" style={{ background: 'var(--bg)', transition: 'background 0.3s' }}>
@@ -74,15 +56,7 @@ export default async function HomePage() {
           </p>
 
           <div className="flex justify-center">
-            {writtenToday ? (
-              <p className="font-display text-base" style={{ color: 'var(--fg-tertiary)', letterSpacing: '-0.01em' }}>
-                you&apos;ve already written today. come back tomorrow.
-              </p>
-            ) : (
-              <Link href="/write">
-                <OriginButton>Write today&apos;s entry</OriginButton>
-              </Link>
-            )}
+            <WriteButton />
           </div>
         </div>
       </LampContainer>
