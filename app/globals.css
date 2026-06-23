@@ -79,12 +79,37 @@ body {
   --bg-alt: #161616;
   --fg: #F5F5F7;
   --fg-secondary: #86868B;
-  --fg-tertiary: #48484A;
+  --fg-tertiary: #6E6E73;
   --border: rgba(255,255,255,0.08);
   --glass-bg: rgba(20,20,20,0.72);
   --glass-border: rgba(255,255,255,0.08);
 }
 
+
+.polaroid-flip-card {
+  perspective: 900px;
+  cursor: default;
+}
+
+.polaroid-flip-inner {
+  position: relative;
+  width: 260px;
+  height: 300px;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+.polaroid-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.polaroid-back {
+  transform: rotateY(180deg);
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

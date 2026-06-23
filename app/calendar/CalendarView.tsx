@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { OriginButton } from '@/components/ui/origin-button';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, BarChart2, Flame, BookOpen, Image, Trophy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,9 +14,11 @@ interface Stats {
   totalPhotos: number;
 }
 
+interface Daylist { id: string; title: string; created_at: string; }
+
 interface Props {
-  entryMap: Record<string, { id: string; title: string }>;
-  stats: Stats;
+  daylists: Daylist[];
+  totalPhotos: number;
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -25,8 +28,45 @@ function toKey(y: number, m: number, d: number) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-export default function CalendarView({ entryMap, stats }: Props) {
+export default function CalendarView({ daylists, totalPhotos }: Props) {
   const today = new Date();
+
+  // Build entryMap client-side so dates use local timezone
+  const entryMap: Record<string, { id: string; title: string }> = {};
+  for (const d of daylists) {
+    const local = new Date(d.created_at);
+    const key = toKey(local.getFullYear(), local.getMonth(), local.getDate());
+    if (!entryMap[key]) entryMap[key] = { id: d.id, title: d.title };
+  }
+
+  const sortedKeys = Object.keys(entryMap).sort();
+
+  // Current streak
+  let streak = 0;
+  const cur = new Date(today);
+  while (true) {
+    const k = toKey(cur.getFullYear(), cur.getMonth(), cur.getDate());
+    if (!entryMap[k]) break;
+    streak++;
+    cur.setDate(cur.getDate() - 1);
+  }
+
+  // Longest streak — compare consecutive local-date keys
+  let longestStreak = 0;
+  let runStreak = 0;
+  let prevKey: string | null = null;
+  for (const k of sortedKeys) {
+    if (prevKey) {
+      const prev = new Date(prevKey + 'T12:00:00');
+      const curr = new Date(k + 'T12:00:00');
+      const diff = Math.round((curr.getTime() - prev.getTime()) / 86400000);
+      if (diff === 1) { runStreak++; } else { runStreak = 1; }
+    } else { runStreak = 1; }
+    longestStreak = Math.max(longestStreak, runStreak);
+    prevKey = k;
+  }
+
+  const stats: Stats = { streak, longestStreak, totalEntries: sortedKeys.length, totalPhotos };
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [statsOpen, setStatsOpen] = useState(false);
@@ -49,13 +89,11 @@ export default function CalendarView({ entryMap, stats }: Props) {
 
   const matchesFilter = (key: string) => {
     if (!hasFilter) return false;
-    const d = new Date(key);
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
-    const dy = String(d.getDate()).padStart(2, '0');
-    const yr = String(d.getFullYear());
+    // key is already "YYYY-MM-DD" in local time — parse directly, no Date constructor
+    const [yr, mo, dy] = key.split('-');
     if (filter.year && !yr.startsWith(filter.year)) return false;
-    if (filter.month && !mo.startsWith(filter.month.padStart(2, '0'))) return false;
-    if (filter.day && !dy.startsWith(filter.day.padStart(2, '0'))) return false;
+    if (filter.month && mo !== filter.month.padStart(2, '0')) return false;
+    if (filter.day && dy !== filter.day.padStart(2, '0')) return false;
     return true;
   };
 
@@ -87,16 +125,13 @@ export default function CalendarView({ entryMap, stats }: Props) {
 
         {/* Stats button — right */}
         <div className="relative" onMouseEnter={() => setStatsOpen(true)} onMouseLeave={() => setStatsOpen(false)}>
-          <button
-            className="w-9 h-9 flex items-center justify-center rounded-[10px] transition-all"
-            style={{
-              background: statsOpen ? 'var(--fg)' : 'var(--bg-alt)',
-              border: '1px solid var(--border)',
-              color: statsOpen ? 'var(--bg)' : 'var(--fg-secondary)',
-            }}
+          <OriginButton
+            aria-label="Stats"
+            className="h-9 w-9 rounded-[10px] px-0"
+            style={{ background: 'var(--bg-alt)', color: 'var(--fg-secondary)' }}
           >
             <BarChart2 size={15} />
-          </button>
+          </OriginButton>
 
           <AnimatePresence>
             {statsOpen && (

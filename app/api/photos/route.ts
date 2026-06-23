@@ -10,8 +10,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from('photos')
       .select('id, storage_path, fingerprint, created_at')
-      .order('created_at', { ascending: false })
-      .limit(20);
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Photos fetch error:', error);

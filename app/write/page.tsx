@@ -7,7 +7,8 @@ import { BackButton } from '@/components/BackButton';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { OriginButton } from '@/components/ui/origin-button';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Bold, Italic, Underline, Strikethrough, Quote, Highlighter, Palette, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { Upload, Bold, Italic, Underline, Strikethrough, Highlighter, Palette, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { useTheme } from '@/components/ThemeProvider';
 
 const PROMPTS = [
   "What made you pause today?",
@@ -37,8 +38,59 @@ interface PhotoPreview {
 
 type LoadingState = 'idle' | 'analyzing' | 'creating' | 'done';
 
-const TEXT_COLORS = ['#E74C3C', '#E67E22', '#F1C40F', '#27AE60', '#2980B9', '#8E44AD'];
+
+// Split plain text into ~700-char chunks at sentence/word boundaries,
+// then map back to the original HTML by accumulating block elements.
+// 700 chars ≈ 17 lines × 41 chars/line at 13.5px Georgia on 324px wide page.
+const CHARS_PER_PAGE = 700;
+
+function extractParagraphs(html: string): string[] {
+  // Split on block-level tags and <br> sequences
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|p|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function paginateHtml(html: string): string[] {
+  if (!html.trim()) return [];
+
+  const paragraphs = extractParagraphs(html);
+  if (!paragraphs.length) return [html];
+
+  // Build pages by accumulating paragraphs until we hit the char limit
+  const pages: string[] = [];
+  let page = '';
+  let pageChars = 0;
+
+  for (const para of paragraphs) {
+    // Long paragraphs that alone exceed a page get their own page
+    if (pageChars > 0 && pageChars + para.length > CHARS_PER_PAGE) {
+      pages.push(page.trim());
+      page = para + '\n\n';
+      pageChars = para.length;
+    } else {
+      page += para + '\n\n';
+      pageChars += para.length;
+    }
+  }
+  if (page.trim()) pages.push(page.trim());
+
+  // Wrap each page in a div so the book renders it as plain text
+  return pages.map(p => `<div style="white-space:pre-wrap">${p}</div>`);
+}
+
+const TEXT_COLORS = ['#000000', '#E74C3C', '#E67E22', '#F1C40F', '#27AE60', '#2980B9', '#8E44AD'];
 const HIGHLIGHT_COLORS = ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#BDE0FE', '#E2BAFF'];
+// px values for font sizes 8–10 (beyond execCommand's 1–7 range)
+const FONT_SIZE_PX: Record<number, number> = { 8: 48, 9: 56, 10: 64 };
 
 function Divider() {
   return <div className="w-px h-5 mx-1 flex-shrink-0" style={{ background: 'var(--border)' }} />;
@@ -73,6 +125,8 @@ function ToolbarBtn({ label, active, tooltip, setTooltip, onMouseDown, children 
 
 export default function WritePage() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const prompt = getDailyPrompt();
   const [entryText, setEntryText] = useState('');
   const [photos, setPhotos] = useState<PhotoPreview[]>([]);
@@ -89,6 +143,59 @@ export default function WritePage() {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [textColor, setTextColor] = useState<string | null>(null);
+  const [hasEntryToday, setHasEntryToday] = useState(false);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    fetch(`/api/daylists?date=${today}`)
+      .then(r => r.json())
+      .then(data => { if (data?.exists) setHasEntryToday(true); })
+      .catch(() => {});
+  }, []);
+
+  // When theme flips, swap black↔white inline color spans in the editor
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const swapDefaultColors = (root: HTMLElement, dark: boolean) => {
+      const from = dark ? ['rgb(0, 0, 0)', '#000000', '#000'] : ['rgb(255, 255, 255)', '#ffffff', '#fff'];
+      const to = dark ? '#ffffff' : '#000000';
+      root.querySelectorAll<HTMLElement>('[style*="color"]').forEach(node => {
+        if (from.some(f => f.toLowerCase() === node.style.color.toLowerCase())) {
+          node.style.color = to;
+        }
+      });
+    };
+    swapDefaultColors(el, isDark);
+    const stale = isDark ? ['rgb(0, 0, 0)', '#000000', '#000'] : ['rgb(255, 255, 255)', '#ffffff', '#fff'];
+    if (textColor && stale.some(c => c.toLowerCase() === textColor.toLowerCase())) {
+      setTextColor(null);
+    }
+  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // MutationObserver: strip default-color spans auto-inserted by the browser during typing
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const obs = new MutationObserver(mutations => {
+      const defaultColor = isDark ? ['rgb(0, 0, 0)', '#000000', '#000'] : ['rgb(255, 255, 255)', '#ffffff', '#fff'];
+      mutations.forEach(m => {
+        m.addedNodes.forEach(node => {
+          if (node.nodeType !== Node.ELEMENT_NODE) return;
+          const el = node as HTMLElement;
+          const targets = [el, ...Array.from(el.querySelectorAll<HTMLElement>('[style*="color"]'))];
+          targets.forEach(t => {
+            if (t.style?.color && defaultColor.some(c => c.toLowerCase() === t.style.color.toLowerCase())) {
+              t.style.color = '';
+            }
+          });
+        });
+      });
+    });
+    obs.observe(el, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, [isDark]);
+
   const [flashMinus, setFlashMinus] = useState(false);
   const [flashPlus, setFlashPlus] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -117,7 +224,7 @@ export default function WritePage() {
   const updateActiveFormats = () => {
     const sel = window.getSelection();
     const node = sel?.anchorNode;
-    const el = node?.nodeType === 3 ? node.parentElement : node as Element | null;
+    const el = (node?.nodeType === 3 ? node.parentElement : node) as HTMLElement | null;
     const inBlockquote = !!el?.closest('blockquote');
     setActiveFormats({
       bold: document.queryCommandState('bold'),
@@ -129,11 +236,58 @@ export default function WritePage() {
       justifyRight: document.queryCommandState('justifyRight'),
       quote: inBlockquote,
     });
+
+    // Reflect text color at cursor
+    const foreColor = document.queryCommandValue('foreColor');
+    setTextColor(foreColor || null);
+
+    // Reflect highlight at cursor
+    const backColor = document.queryCommandValue('backColor');
+    const noHighlight = !backColor || backColor === 'transparent' || backColor === 'rgba(0, 0, 0, 0)' || backColor === 'rgb(255, 255, 255)' || backColor === 'inherit';
+    if (noHighlight) {
+      setHighlightOn(false);
+    } else {
+      setHighlightColor(backColor);
+      setHighlightOn(true);
+    }
+
+    // Reflect font size at cursor
+    const fontSizeVal = document.queryCommandValue('fontSize');
+    if (fontSizeVal && fontSizeVal !== '0') {
+      setFontSize(parseInt(fontSizeVal));
+    } else if (el) {
+      const computedPx = parseFloat(window.getComputedStyle(el).fontSize);
+      const customMatch = Object.entries(FONT_SIZE_PX).find(([, v]) => Math.abs(v - computedPx) < 4);
+      setFontSize(customMatch ? parseInt(customMatch[0]) : 3);
+    }
   };
 
   const exec = (cmd: string, value?: string) => {
     editorRef.current?.focus();
     document.execCommand(cmd, false, value);
+    updateActiveFormats();
+  };
+
+  const applyFontSize = (size: number) => {
+    editorRef.current?.focus();
+    if (size <= 7) {
+      document.execCommand('fontSize', false, String(size));
+    } else {
+      const px = FONT_SIZE_PX[size];
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) return;
+      const span = document.createElement('span');
+      span.style.fontSize = `${px}px`;
+      try {
+        range.surroundContents(span);
+      } catch {
+        const fragment = range.extractContents();
+        span.appendChild(fragment);
+        range.insertNode(span);
+      }
+    }
     updateActiveFormats();
   };
 
@@ -194,10 +348,12 @@ export default function WritePage() {
         photoIds = data.fingerprints.map((f: { photoId: string }) => f.photoId);
       }
       setLoadingState('creating');
+      const html = getEditorHTML();
+      const pageHtml = paginateHtml(html);
       const res = await fetch('/api/create-daylist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entryText: text, entryHtml: getEditorHTML(), photoIds }),
+        body: JSON.stringify({ entryText: text, entryHtml: html, pageHtml, photoIds }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to create entry');
       const { daylistId } = await res.json();
@@ -236,7 +392,7 @@ export default function WritePage() {
         </p>
 
         {/* Formatting toolbar */}
-        <div className="flex items-center gap-0.5 mb-2 -ml-1 sticky top-14 z-10 py-2" style={{ background: 'var(--bg)' }}>
+        <div className="flex items-center gap-0.5 mb-1 -ml-1 sticky top-14 z-10 py-1" style={{ background: 'var(--bg)' }}>
 
           {/* Group 1: Bold Italic Underline Strikethrough */}
           {([
@@ -271,12 +427,25 @@ export default function WritePage() {
                 <motion.div initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }} transition={{ duration: 0.14 }}
                   className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 p-2 rounded-xl flex gap-1.5"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-                  {TEXT_COLORS.map(color => (
-                    <button key={color} type="button"
-                      onMouseDown={e => { e.preventDefault(); applyColor(color); }}
-                      className="w-5 h-5 rounded-full transition-transform hover:scale-110"
-                      style={{ background: color }} />
-                  ))}
+                  {TEXT_COLORS.map((color, i) => {
+                    const displayColor = i === 0 ? (isDark ? '#ffffff' : '#000000') : color;
+                    return (
+                      <button key={color} type="button"
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          if (i === 0) {
+                            // Default — remove inline color so text inherits var(--fg)
+                            exec('removeFormat');
+                            setTextColor(null);
+                            setColorPickerOpen(false);
+                          } else {
+                            applyColor(color);
+                          }
+                        }}
+                        className="w-5 h-5 rounded-full transition-transform hover:scale-110"
+                        style={{ background: displayColor, border: i === 0 ? '1px solid var(--border)' : 'none' }} />
+                    );
+                  })}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -296,7 +465,7 @@ export default function WritePage() {
                 editorRef.current?.focus();
               }}
               className="w-8 h-8 flex items-center justify-center rounded-lg transition-all"
-              style={{ background: highlightOn ? highlightColor : 'transparent', color: highlightOn ? '#000' : 'var(--fg-secondary)' }}
+              style={{ background: highlightOn ? highlightColor : 'transparent', color: highlightOn ? (isDark ? '#fff' : '#000') : 'var(--fg-secondary)' }}
               onMouseOver={e => { if (!highlightOn) e.currentTarget.style.background = 'var(--border)'; }}
               onMouseOut={e => { if (!highlightOn) e.currentTarget.style.background = 'transparent'; }}>
               <Highlighter size={14} />
@@ -306,6 +475,17 @@ export default function WritePage() {
                 <motion.div initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }} transition={{ duration: 0.14 }}
                   className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 p-2 rounded-xl flex gap-1.5"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+                  <button type="button"
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      setHighlightOn(false);
+                      document.execCommand('backColor', false, 'transparent');
+                      document.execCommand('hiliteColor', false, 'transparent');
+                      editorRef.current?.focus();
+                    }}
+                    className="w-5 h-5 rounded-full transition-transform hover:scale-110 flex items-center justify-center text-xs font-medium"
+                    style={{ background: isDark ? '#000' : '#fff', border: '1px solid var(--border)', color: 'var(--fg-secondary)', outline: !highlightOn ? '2px solid var(--fg)' : 'none', outlineOffset: 1 }}
+                  >✕</button>
                   {HIGHLIGHT_COLORS.map(color => (
                     <button key={color} type="button"
                       onMouseDown={e => {
@@ -317,21 +497,13 @@ export default function WritePage() {
                         editorRef.current?.focus();
                       }}
                       className="w-5 h-5 rounded-full transition-transform hover:scale-110 flex items-center justify-center"
-                      style={{ background: color, outline: highlightColor === color ? '2px solid var(--fg)' : 'none', outlineOffset: 1 }}
+                      style={{ background: color, outline: highlightOn && highlightColor === color ? '2px solid var(--fg)' : 'none', outlineOffset: 1 }}
                     />
                   ))}
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-
-          <Divider />
-
-          {/* Group 3: Quote */}
-          <ToolbarBtn label="Quote" active={!!activeFormats.quote} tooltip={tooltip} setTooltip={setTooltip}
-            onMouseDown={toggleQuote}>
-            <Quote size={14} />
-          </ToolbarBtn>
 
           <Divider />
 
@@ -356,7 +528,7 @@ export default function WritePage() {
                 e.preventDefault();
                 const next = Math.max(1, fontSize - 1);
                 setFontSize(next);
-                exec('fontSize', String(next));
+                applyFontSize(next);
                 setFlashMinus(true); setTimeout(() => setFlashMinus(false), 150);
               }}
               className="w-6 h-6 flex items-center justify-center rounded text-xs transition-colors hover:bg-[var(--border)] hover:text-[var(--fg)]"
@@ -370,9 +542,9 @@ export default function WritePage() {
             <button type="button"
               onMouseDown={e => {
                 e.preventDefault();
-                const next = Math.min(7, fontSize + 1);
+                const next = Math.min(10, fontSize + 1);
                 setFontSize(next);
-                exec('fontSize', String(next));
+                applyFontSize(next);
                 setFlashPlus(true); setTimeout(() => setFlashPlus(false), 150);
               }}
               className="w-6 h-6 flex items-center justify-center rounded text-xs transition-colors hover:bg-[var(--border)] hover:text-[var(--fg)]"
@@ -384,10 +556,17 @@ export default function WritePage() {
 
         </div>
 
+        {/* Already written today */}
+        {hasEntryToday && (
+          <p className="font-display text-lg" style={{ color: 'var(--fg-tertiary)', letterSpacing: '-0.01em', paddingBottom: 24, borderBottom: '1px solid var(--border)' }}>
+            you&apos;ve already written today. come back tomorrow.
+          </p>
+        )}
+
         {/* Rich text editor */}
         <div
           ref={editorRef}
-          contentEditable={!isLoading}
+          contentEditable={!isLoading && !hasEntryToday}
           suppressContentEditableWarning
           onInput={() => {
             const text = editorRef.current?.innerText ?? '';
@@ -399,6 +578,8 @@ export default function WritePage() {
           onKeyUp={updateActiveFormats}
           onMouseUp={updateActiveFormats}
           onSelect={updateActiveFormats}
+          onFocus={updateActiveFormats}
+          onBlur={() => { setActiveFormats({}); setTextColor(null); setHighlightOn(false); setFontSize(3); }}
           onKeyDown={e => {
             // Exit blockquote on Enter when current line is empty
             if (e.key === 'Enter' && !e.shiftKey) {

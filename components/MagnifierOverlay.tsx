@@ -31,22 +31,44 @@ export function MagnifierOverlay() {
       const W = window.innerWidth;
       const H = window.innerHeight;
 
+      // Snapshot scroll positions of all scrollable elements before cloning
+      const scrollables = Array.from(document.body.querySelectorAll('*')).filter(el => {
+        const s = el.scrollTop || el.scrollLeft;
+        return s > 0;
+      }) as HTMLElement[];
+      const scrollMap = scrollables.map(el => ({
+        selector: el.getAttribute('data-scroll-id') || null,
+        el,
+        top: el.scrollTop,
+        left: el.scrollLeft,
+      }));
+
       const clone = document.body.cloneNode(true) as HTMLElement;
       clone.querySelectorAll('[data-magnifier-overlay]').forEach(el => el.remove());
       clone.style.pointerEvents = 'none';
-      // Force the clone to render at full viewport size so layout is identical to real page
       clone.style.width = `${W}px`;
       clone.style.minHeight = `${H}px`;
       clone.style.overflow = 'hidden';
       clone.style.margin = '0';
 
-      // Wrap in a viewport-sized container so fixed-position children behave correctly
       wrap.style.width = `${W}px`;
       wrap.style.height = `${H}px`;
       wrap.style.overflow = 'hidden';
 
       wrap.innerHTML = '';
       wrap.appendChild(clone);
+
+      // Replay scroll positions on the cloned elements by matching DOM position
+      const allOriginal = Array.from(document.body.querySelectorAll('*')) as HTMLElement[];
+      const allClone = Array.from(clone.querySelectorAll('*')) as HTMLElement[];
+      scrollMap.forEach(({ el, top, left }) => {
+        const idx = allOriginal.indexOf(el);
+        if (idx !== -1 && allClone[idx]) {
+          allClone[idx].scrollTop = top;
+          allClone[idx].scrollLeft = left;
+        }
+      });
+
       setReady(true);
     };
 
@@ -71,10 +93,7 @@ export function MagnifierOverlay() {
       lens.style.transform = `translate(${x - LENS_R}px, ${y - LENS_R}px)`;
       const wrap = cloneWrapRef.current;
       if (wrap) {
-        // Account for scroll: cursor (x,y) is viewport coords, clone renders from doc top
-        const sx = window.scrollX;
-        const sy = window.scrollY;
-        wrap.style.transform = `translate(${LENS_R - (x + sx) * ZOOM}px, ${LENS_R - (y + sy) * ZOOM}px) scale(${ZOOM})`;
+        wrap.style.transform = `translate(${LENS_R - x * ZOOM}px, ${LENS_R - y * ZOOM}px) scale(${ZOOM})`;
       }
     });
   }, []);

@@ -17,6 +17,7 @@ export interface JournalEntry {
   id: string;
   text: string;
   photo_ids: string[];
+  page_html: string[] | null;
   created_at: string;
 }
 

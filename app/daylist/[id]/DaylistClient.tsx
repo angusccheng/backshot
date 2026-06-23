@@ -27,7 +27,7 @@ const CHARS_PER_PAGE = 680;
 
 type PageDef =
   | { kind: 'entry'; html: string }
-  | { kind: 'ai-photo'; photo?: Photo }
+  | { kind: 'ai-photo'; photo?: Photo; reason?: string; caption?: string }
   | { kind: 'blank' };
 
 // ── HTML text splitter ────────────────────────────────────────────────────
@@ -98,35 +98,48 @@ function tapeHash(id: string) {
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
 const CORNERS: Corner[] = ['tl', 'tr', 'bl', 'br'];
 
-function CornerTape({ corner, wobble }: { corner: Corner; wobble: number }) {
-  const base: React.CSSProperties = {
-    position: 'absolute', width: 38, height: 15,
-    background: 'rgba(215,208,168,0.62)', borderRadius: 2, zIndex: 10,
-    boxShadow: 'inset 0 0 0 1px rgba(180,170,120,0.28)',
-  };
-  const w = wobble; // small extra rotation ±6°
-  if (corner === 'tl') return <div style={{ ...base, top: -4, left: -4, transform: `rotate(${-45 + w}deg)` }} />;
-  if (corner === 'tr') return <div style={{ ...base, top: -4, right: -4, transform: `rotate(${45 + w}deg)` }} />;
-  if (corner === 'bl') return <div style={{ ...base, bottom: -4, left: -4, transform: `rotate(${45 + w}deg)` }} />;
-                       return <div style={{ ...base, bottom: -4, right: -4, transform: `rotate(${-45 + w}deg)` }} />;
-}
-
 function TapeStrips({ id }: { id: string }) {
   const h = tapeHash(id);
-  // Pick 1–3 corners to tape (never all 4 — too uniform)
-  const count = 1 + (h % 3);
-  const used = new Set<Corner>();
-  const strips: { corner: Corner; wobble: number }[] = [];
+  const style = h % 3; // 0 = horizontal top+bottom, 1 = TL+BR corners, 2 = TR+BL corners
+  const wobble1 = ((h >> 4) % 9) - 4;
+  const wobble2 = ((h >> 8) % 9) - 4;
 
-  for (let i = 0; i < 8 && strips.length < count; i++) {
-    const corner = CORNERS[(h >> (i * 4)) % 4];
-    if (used.has(corner)) continue;
-    used.add(corner);
-    const wobble = ((h >> (i * 3 + 2)) % 13) - 6;
-    strips.push({ corner, wobble });
+  const tape: React.CSSProperties = {
+    position: 'absolute', height: 14,
+    background: 'rgba(215,208,168,0.65)', borderRadius: 2, zIndex: 10,
+    boxShadow: 'inset 0 0 0 1px rgba(180,170,120,0.28)',
+  };
+
+  if (style === 0) {
+    // Horizontal strips centered on top and bottom edges
+    return (
+      <>
+        <div style={{ ...tape, width: 48, top: -7, left: '50%', transform: `translateX(-50%) rotate(${wobble1}deg)` }} />
+        <div style={{ ...tape, width: 48, bottom: -7, left: '50%', transform: `translateX(-50%) rotate(${wobble2}deg)` }} />
+      </>
+    );
   }
 
-  return <>{strips.map((s, i) => <CornerTape key={i} {...s} />)}</>;
+  const W = 40, inset = 10;
+  const corner: React.CSSProperties = { ...tape, width: W };
+
+  if (style === 1) {
+    // Diagonal on TL + BR
+    return (
+      <>
+        <div style={{ ...corner, top: inset - 7, left: inset - W/2, transform: `rotate(${-45 + wobble1}deg)` }} />
+        <div style={{ ...corner, bottom: inset - 7, right: inset - W/2, transform: `rotate(${-45 + wobble2}deg)` }} />
+      </>
+    );
+  }
+
+  // style === 2: Diagonal on TR + BL
+  return (
+    <>
+      <div style={{ ...corner, top: inset - 7, right: inset - W/2, transform: `rotate(${45 + wobble1}deg)` }} />
+      <div style={{ ...corner, bottom: inset - 7, left: inset - W/2, transform: `rotate(${45 + wobble2}deg)` }} />
+    </>
+  );
 }
 
 // ── Polaroid ─────────────────────────────────────────────────────────────
@@ -151,6 +164,50 @@ function PolaroidPhoto({ photo, index, onCropClick, size = 168 }: { photo: Photo
   );
 }
 
+// ── Photo flip modal ─────────────────────────────────────────────────────
+function PhotoFlipModal({ photo, reason, caption, onClose }: { photo: Photo; reason?: string; caption?: string; onClose: () => void }) {
+  const [flipped, setFlipped] = useState(false);
+  const cropPos = getCropPosition(photo.id);
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(14px)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.88, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, cursor: 'pointer', perspective: 900 }}
+        onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFlipped(f => !f); }}
+      >
+        <motion.div
+          animate={{ rotateY: flipped ? 180 : 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 28 }}
+          style={{ transformStyle: 'preserve-3d', position: 'relative', width: 260, height: 310 }}
+        >
+          {/* Front */}
+          <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', background: '#fff', padding: '10px 10px 0 10px', boxShadow: '0 24px 64px rgba(0,0,0,0.4)', borderRadius: 3 }}>
+            <div style={{ width: 240, height: 240, overflow: 'hidden', background: '#ddd' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photo.storage_path} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: cropPos }} draggable={false} />
+            </div>
+            <div style={{ height: 50 }} />
+          </div>
+          {/* Back */}
+          <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', background: '#fafaf8', padding: '28px 24px', boxShadow: '0 24px 64px rgba(0,0,0,0.4)', borderRadius: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
+            {caption && <p style={{ fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: '21px', color: '#2a2a2a', fontStyle: 'italic' }}>"{caption}"</p>}
+            {reason && <p style={{ fontSize: 11, lineHeight: '18px', color: '#6E6E73', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: 14 }}>{reason}</p>}
+          </div>
+        </motion.div>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', letterSpacing: '0.08em' }}>
+          {flipped ? 'TAP TO FLIP BACK' : 'TAP TO FLIP'}
+        </span>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Lined paper ──────────────────────────────────────────────────────────
 const linedStyle: React.CSSProperties = {
   backgroundColor: '#fafaf8',
@@ -159,7 +216,7 @@ const linedStyle: React.CSSProperties = {
 };
 
 // ── Page ─────────────────────────────────────────────────────────────────
-const Page = ({ page, onCropClick }: { page: PageDef; onCropClick?: (photo: Photo) => void }) => {
+const Page = ({ page, onCropClick, onFlipClick }: { page: PageDef; onCropClick?: (photo: Photo) => void; onFlipClick?: (photo: Photo, reason?: string, caption?: string) => void }) => {
   void onCropClick;
   const base: React.CSSProperties = {
     width: '100%', height: '100%', overflow: 'hidden',
@@ -172,8 +229,8 @@ const Page = ({ page, onCropClick }: { page: PageDef; onCropClick?: (photo: Phot
   if (page.kind === 'entry') {
     const isHtml = /<[a-z][\s\S]*>/i.test(page.html);
     return (
-      <div style={{ ...base, ...linedStyle }}>
-        <div style={{ padding: `${LINE_HEIGHT}px 28px`, height: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+      <div style={{ ...base, ...linedStyle, overflow: 'auto' }}>
+        <div style={{ padding: `${LINE_HEIGHT}px 28px`, boxSizing: 'border-box' }}>
           {page.html ? (
             isHtml ? (
               <div
@@ -206,20 +263,35 @@ const Page = ({ page, onCropClick }: { page: PageDef; onCropClick?: (photo: Phot
 
   if (page.kind === 'ai-photo') {
     const h = page.photo ? tapeHash(page.photo.id) : 0;
-    const rot = ((h % 21) - 10) * 1.2; // -12 to +12 deg
-    const nudgeX = ((h >> 3) % 41) - 20; // -20 to +20px
-    const nudgeY = ((h >> 6) % 31) - 15; // -15 to +15px
+    const rot = ((h % 11) - 5) * 1.0;
+    const nudgeX = ((h >> 3) % 41) - 20;
+    const nudgeY = ((h >> 6) % 31) - 15;
     return (
       <div style={{ ...base, ...linedStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {page.photo?.storage_path ? (
-          <div style={{ position: 'relative', display: 'inline-block', marginTop: nudgeY, marginLeft: nudgeX }}>
+          <div style={{ position: 'relative', display: 'inline-block', marginTop: nudgeY, marginLeft: nudgeX, zIndex: 10 }}>
             <TapeStrips id={page.photo.id} />
-            <div style={{ background: '#fff', padding: '10px 10px 0 10px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', transform: `rotate(${rot}deg)`, display: 'inline-block', borderRadius: 3 }}>
-              <div style={{ width: 240, height: 240, overflow: 'hidden', background: '#ddd' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={page.photo.storage_path} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} draggable={false} />
+            {/* Flip card wrapper — JS-driven so DOM clone in magnifier captures the flipped state */}
+            <div
+              style={{ transform: `rotate(${rot}deg)`, display: 'inline-block', perspective: 900 }}
+              onMouseEnter={e => { const el = e.currentTarget.querySelector('.polaroid-flip-inner') as HTMLElement; if (el) el.style.transform = 'rotateY(180deg)'; }}
+              onMouseLeave={e => { const el = e.currentTarget.querySelector('.polaroid-flip-inner') as HTMLElement; if (el) el.style.transform = 'rotateY(0deg)'; }}
+            >
+              <div className="polaroid-flip-inner" style={{ transition: 'transform 0.5s cubic-bezier(0.4,0,0.2,1)' }}>
+                {/* Front */}
+                <div className="polaroid-face polaroid-front" style={{ background: '#fff', padding: '10px 10px 0 10px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', borderRadius: 3 }}>
+                  <div style={{ width: 240, height: 240, overflow: 'hidden', background: '#ddd' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={page.photo.storage_path} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} draggable={false} />
+                  </div>
+                  <div style={{ height: 40 }} />
+                </div>
+                {/* Back */}
+                <div className="polaroid-face polaroid-back" style={{ background: '#fff', padding: '20px 18px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', borderRadius: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 14 }}>
+                  {page.caption && <p style={{ fontFamily: 'Georgia, serif', fontSize: 12, lineHeight: '20px', color: '#2a2a2a', fontStyle: 'italic', margin: 0 }}>"{page.caption}"</p>}
+                  {page.reason && <p style={{ fontSize: 10.5, lineHeight: '17px', color: '#6E6E73', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: 12, margin: 0 }}>{page.reason}</p>}
+                </div>
               </div>
-              <div style={{ height: 40 }} />
             </div>
           </div>
         ) : (
@@ -286,6 +358,7 @@ export default function DaylistClient({ daylist, photos, uploadedPhotos, entry }
   const [mounted, setMounted] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
+  const [flipPhoto, setFlipPhoto] = useState<{ photo: Photo; reason?: string; caption?: string } | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -295,14 +368,11 @@ export default function DaylistClient({ daylist, photos, uploadedPhotos, entry }
   const pageDefs: PageDef[] = [];
 
   if (entry) {
-    // Split entry text/HTML into multiple pages
-    const chunks = splitHtmlIntoPages(entry.text ?? '');
-    chunks.forEach(html => pageDefs.push({ kind: 'entry', html }));
+    pageDefs.push({ kind: 'entry', html: entry.text ?? '' });
   }
 
-  // AI-matched photos only (no captions) — each gets its own page
   daylist.matched_photos.forEach(mp => {
-    pageDefs.push({ kind: 'ai-photo', photo: photoMap.get(mp.photoId) });
+    pageDefs.push({ kind: 'ai-photo', photo: photoMap.get(mp.photoId), reason: mp.reason, caption: mp.caption });
   });
 
   if (pageDefs.length % 2 !== 0) pageDefs.push({ kind: 'blank' });
@@ -374,7 +444,7 @@ export default function DaylistClient({ daylist, photos, uploadedPhotos, entry }
                 const isLeft = i % 2 === 0;
                 return (
                   <div key={i} style={{ width: '100%', height: '100%', overflow: 'hidden', boxSizing: 'border-box', position: 'relative' }}>
-                    <Page page={page} onCropClick={setCropPhoto} />
+                    <Page page={page} onCropClick={setCropPhoto} onFlipClick={(p, r, c) => setFlipPhoto({ photo: p, reason: r, caption: c })} />
                     <div style={{ position: 'absolute', inset: 0, border: '1px solid rgba(0,0,0,0.12)', pointerEvents: 'none' }} />
                     <div style={{
                       position: 'absolute', top: 0, bottom: 0,
@@ -411,6 +481,19 @@ export default function DaylistClient({ daylist, photos, uploadedPhotos, entry }
             photoId={cropPhoto.id}
             src={cropPhoto.storage_path}
             onClose={() => setCropPhoto(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Photo flip modal */}
+      <AnimatePresence>
+        {flipPhoto && (
+          <PhotoFlipModal
+            key={flipPhoto.photo.id}
+            photo={flipPhoto.photo}
+            reason={flipPhoto.reason}
+            caption={flipPhoto.caption}
+            onClose={() => setFlipPhoto(null)}
           />
         )}
       </AnimatePresence>

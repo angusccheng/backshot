@@ -26,6 +26,7 @@ interface Props {
   photoId: string;
   src: string;
   onClose: () => void;
+  onCancel?: () => void;
   onDelete?: () => void;
   onSave?: (pos: string) => void;
 }
@@ -47,7 +48,7 @@ function CornerHandle({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
   );
 }
 
-export function PhotoCropModal({ photoId, src, onClose, onDelete, onSave }: Props) {
+export function PhotoCropModal({ photoId, src, onClose, onCancel, onDelete, onSave }: Props) {
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
     const stored = getCropPosition(photoId);
     const [xStr, yStr] = stored.split(' ');
@@ -107,9 +108,8 @@ export function PhotoCropModal({ photoId, src, onClose, onDelete, onSave }: Prop
         style={{ width: 340, background: 'var(--bg)', boxShadow: '0 40px 80px rgba(0,0,0,0.4)' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <span className="text-xs font-medium uppercase tracking-widest" style={{ color: 'var(--fg-tertiary)' }}>Crop & Position</span>
-          <button onClick={onClose} style={{ color: 'var(--fg-tertiary)' }}><X size={14} /></button>
+        <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <span className="text-xs font-medium uppercase tracking-widest" style={{ color: 'var(--fg-secondary)' }}>Crop & Position</span>
         </div>
 
         {/* Crop preview */}
@@ -149,23 +149,25 @@ export function PhotoCropModal({ photoId, src, onClose, onDelete, onSave }: Prop
           </div>
         </div>
 
-        <div className="px-4 py-2 text-center text-xs" style={{ color: 'var(--fg-tertiary)' }}>
+        <div className="px-4 py-2 text-center text-xs" style={{ color: 'var(--fg-secondary)' }}>
           Drag to reposition
         </div>
 
         {/* Actions */}
         <div className="flex items-center justify-between px-4 pb-4">
-          {onDelete ? (
-            <button onClick={onDelete}
-              className="text-xs px-3 py-1.5 rounded-md transition-opacity hover:opacity-70"
-              style={{ background: 'var(--bg-alt)', color: '#e53e3e', border: '1px solid var(--border)' }}>
-              Delete
-            </button>
-          ) : <div />}
+          <button onClick={onCancel ?? onClose}
+            className="group flex items-center gap-1 transition-opacity hover:opacity-60 outline-none"
+            style={{ color: 'var(--fg-secondary)' }}>
+            <X size={11} />
+            <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[4rem]"
+              style={{ fontSize: 11 }}>Cancel</span>
+          </button>
           <button onClick={handleSave}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-opacity hover:opacity-80"
-            style={{ background: 'var(--fg)', color: 'var(--bg)' }}>
-            <Check size={11} /> Save
+            className="group flex items-center gap-1 transition-opacity hover:opacity-60 outline-none"
+            style={{ color: 'var(--fg-secondary)' }}>
+            <Check size={11} />
+            <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[3rem]"
+              style={{ fontSize: 11 }}>Save</span>
           </button>
         </div>
       </motion.div>

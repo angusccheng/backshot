@@ -20,18 +20,32 @@ function stripMarkdownFences(text: string): string {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { entryText: string; entryHtml?: string; photoIds: string[] };
-    const { entryText, entryHtml, photoIds } = body;
+    const body = await request.json() as { entryText: string; entryHtml?: string; pageHtml?: string[]; photoIds: string[] };
+    const { entryText, entryHtml, pageHtml, photoIds } = body;
 
     if (!entryText) {
       return Response.json({ error: 'entryText is required' }, { status: 400 });
     }
 
+    // Collect photo IDs used in recent daylists (last 10) to avoid repeats
+    const { data: recentDaylists } = await supabase
+      .from('daylists')
+      .select('matched_photos')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const recentlyUsedIds = new Set<string>(photoIds); // also exclude user-uploaded
+    (recentDaylists ?? []).forEach((d: { matched_photos: Array<{ photoId: string }> }) => {
+      (d.matched_photos ?? []).forEach((mp: { photoId: string }) => recentlyUsedIds.add(mp.photoId));
+    });
+
+    const excludeList = Array.from(recentlyUsedIds);
+
     // Fetch all stored photo fingerprints for matching
     const { data: allPhotos } = await supabase
       .from('photos')
       .select('id, fingerprint')
-      .not('id', 'in', `(${photoIds.length ? photoIds.map(id => `"${id}"`).join(',') : '""'})`)
+      .not('id', 'in', `(${excludeList.length ? excludeList.map(id => `"${id}"`).join(',') : '""'})`)
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -42,23 +56,30 @@ export async function POST(request: Request) {
       fingerprint: p.fingerprint,
     }));
 
-    const prompt = `You are a music curator creating a Spotify Daylist.
+    const prompt = `You are a deeply empathetic archivist who connects personal memories to photographs. You read journal entries carefully and find the hidden emotional threads — the specific feelings, images, and moments a person describes — then match those to photos that carry the same emotional truth.
 
-Journal entry: "${entryText}"
+Journal entry:
+"${entryText}"
 
 Available photos and their emotional fingerprints:
 ${JSON.stringify(fingerprintSummary, null, 2)}
 
-Match 1-3 photos from the list that resonate with the journal entry's mood and themes. Then craft a short evocative lowercase title (3-7 words, like "late afternoon golden hour drift").
+Your task:
+1. Read the journal entry closely. Identify the specific emotions, images, sensory details, and underlying feelings the writer is experiencing — not just the surface topics, but what they are really feeling underneath.
+2. Match 3-5 photos whose mood, emotion, and atmosphere genuinely echo what the writer expressed. Prioritize emotional resonance over literal subject matter — a photo of an empty street can match a feeling of loneliness even if the entry never mentions streets.
+3. For each matched photo, write:
+   - "reason": one or two sentences explaining the emotional or thematic bridge between this photo and the entry — what feeling, atmosphere, or undercurrent they share. Do not quote the entry. Write as if you're an archivist explaining your choice to the writer: what you saw in both, why they belong together.
+   - "caption": a single poetic fragment (not a full sentence) written in the writer's voice — something they could have jotted in the margin of their journal. It should feel like it came from the same emotional place as the entry, not like a description of the photo.
+4. Write a short lowercase title (3-7 words) that captures the emotional core of the entry — something the writer would recognize as true about their day.
 
-Return a JSON object with exactly:
+Return only a JSON object:
 {
   "title": "lowercase evocative title here",
   "matchedPhotos": [
     {
       "photoId": "the photo's id from the list",
-      "reason": "one sentence why this photo matches the entry",
-      "caption": "a poetic caption for this photo in this moment"
+      "reason": "specific sentence connecting entry to this photo",
+      "caption": "poetic fragment in the writer's voice"
     }
   ]
 }
@@ -68,21 +89,27 @@ Only return JSON, nothing else. If no photos are available, return an empty matc
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
+      max_tokens: 1800,
     });
 
     const text = stripMarkdownFences(response.choices[0].message.content ?? '');
     const daylistResult = JSON.parse(text) as DaylistResult;
 
-    // GPT sometimes corrupts UUIDs — filter to only real photo IDs
+    // GPT sometimes corrupts UUIDs or repeats — filter and deduplicate
     const validIds = new Set(photosForMatching.map(p => p.id));
-    daylistResult.matchedPhotos = daylistResult.matchedPhotos.filter(mp => validIds.has(mp.photoId));
+    const seenInResponse = new Set<string>();
+    daylistResult.matchedPhotos = daylistResult.matchedPhotos.filter(mp => {
+      if (!validIds.has(mp.photoId) || seenInResponse.has(mp.photoId)) return false;
+      seenInResponse.add(mp.photoId);
+      return true;
+    });
 
     // Save journal entry
     const entryId = crypto.randomUUID();
     const { error: entryError } = await supabase.from('journal_entries').insert({
       id: entryId,
       text: entryHtml ?? entryText,
+      page_html: pageHtml ?? null,
       photo_ids: photoIds,
       created_at: new Date().toISOString(),
     });

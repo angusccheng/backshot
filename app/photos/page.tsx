@@ -13,6 +13,25 @@ import { GooeyLoader } from '@/components/ui/loader-10';
 
 const HOLD_DURATION = 1500;
 
+// Upload button that opens file picker directly with OriginButton flood-fill effect
+function OriginUploadButton({ onFiles }: { onFiles: (files: File[]) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <OriginButton
+        aria-label="Upload photos"
+        onClick={() => inputRef.current?.click()}
+        className="h-9 w-9 rounded-[10px] px-0"
+        style={{ background: 'var(--bg-alt)', color: 'var(--fg-secondary)' }}
+      >
+        <Upload size={15} />
+      </OriginButton>
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden"
+        onChange={e => { onFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
+    </>
+  );
+}
+
 interface ImportPhoto {
   id: string;
   base64: string;
@@ -57,12 +76,12 @@ function HoldTrashButton({ onDelete, deleting }: { onDelete: () => void; deletin
       disabled={deleting}
       onClick={e => e.stopPropagation()}
       className="relative w-8 h-8 rounded-md overflow-hidden flex items-center justify-center disabled:opacity-30"
-      style={{ background: 'rgba(0,0,0,0.07)', color: '#1D1D1F' }}
+      style={{ background: 'var(--bg-alt)', color: 'var(--fg)' }}
       aria-label="Hold to delete"
     >
       <motion.div initial={{ width: '0%' }} animate={controls}
         className="absolute left-0 top-0 h-full"
-        style={{ background: 'rgba(0,0,0,0.18)' }}
+        style={{ background: 'var(--fg)', opacity: 0.15 }}
       />
       <Trash2 size={12} className="relative z-10" />
     </button>
@@ -132,7 +151,7 @@ function ImportPopup({ onImported }: { onImported: () => void }) {
 
   return (
     <div style={{ width: 280 }}>
-      <p className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--fg-tertiary)' }}>Import photos</p>
+      <p className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--fg-secondary)' }}>Import photos</p>
 
       {done ? (
         <div className="text-center py-2">
@@ -157,7 +176,7 @@ function ImportPopup({ onImported }: { onImported: () => void }) {
             className="rounded-xl text-center cursor-pointer transition-all mb-3 py-5"
             style={{ border: '1.5px dashed var(--fg-tertiary)', background: 'var(--bg-alt)' }}
           >
-            <Upload size={16} className="mx-auto mb-1.5" style={{ color: 'var(--fg-tertiary)' }} />
+            <Upload size={16} className="mx-auto mb-1.5" style={{ color: 'var(--fg-secondary)' }} />
             <p className="text-xs" style={{ color: 'var(--fg-secondary)' }}>Drop or <span className="underline">browse</span></p>
             <input
               ref={fileInputRef}
@@ -238,7 +257,6 @@ export default function PhotosPage() {
   const [cropping, setCropping] = useState<Photo | null>(null);
   const [cropVersions, setCropVersions] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<{ month: string; day: string; year: string }>({ month: '', day: '', year: '' });
-  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Photo | null>(null);
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editCaption, setEditCaption] = useState('');
@@ -265,6 +283,23 @@ export default function PhotosPage() {
   }, []);
 
   useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
+
+  const [uploading, setUploading] = useState(false);
+
+  const uploadFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+    setUploading(true);
+    const toBase64 = (file: File): Promise<string> =>
+      new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+    for (let i = 0; i < imageFiles.length; i += 3) {
+      const batch = imageFiles.slice(i, i + 3);
+      const photos = await Promise.all(batch.map(async f => ({ base64: await toBase64(f), photoId: crypto.randomUUID() })));
+      await fetch('/api/analyze-photos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photos }) });
+    }
+    setUploading(false);
+    fetchPhotos();
+  }, [fetchPhotos]);
 
   const handleDelete = useCallback(async (id: string) => {
     setDeletingId(id);
@@ -294,7 +329,7 @@ export default function PhotosPage() {
     <main className="min-h-screen" style={{ background: 'var(--bg)', transition: 'background 0.3s' }}>
       <nav className="glass fixed top-0 left-0 right-0 z-20 px-8 h-14 flex items-center justify-center relative" style={{ borderBottom: '1px solid var(--border)' }}>
         <BackButton />
-        <span className="font-display font-semibold text-sm" style={{ color: 'var(--fg)' }}>Photo Library</span>
+        <span className="font-display font-semibold text-sm" style={{ color: 'var(--fg)' }}>Photos</span>
         <div className="flex items-center gap-3">
           <ThemeToggle />
         </div>
@@ -316,7 +351,7 @@ export default function PhotosPage() {
             <p className="font-display text-3xl font-light mb-3" style={{ color: 'var(--fg)', letterSpacing: '-0.02em' }}>No photos yet.</p>
             <p className="text-base mb-10" style={{ color: 'var(--fg-secondary)' }}>Import photos so the AI has memories to draw from.</p>
             <button
-              onClick={() => setImportOpen(true)}
+              onClick={() => document.querySelector<HTMLInputElement>('input[type=file]')?.click()}
               className="inline-flex items-center justify-center rounded-lg px-8 py-3.5 font-display font-medium text-base"
               style={{ background: 'var(--fg)', color: 'var(--bg)' }}
             >
@@ -330,50 +365,32 @@ export default function PhotosPage() {
               <div className="flex items-center gap-3">
                 <DateSearch onChange={setFilter} />
                 {hasFilter && (
-                  <span className="text-xs" style={{ color: 'var(--fg-tertiary)' }}>
+                  <span className="text-xs" style={{ color: 'var(--fg-secondary)' }}>
                     {filteredPhotos.length} of {photos.length}
                   </span>
                 )}
               </div>
 
-              {/* Import button — click to open */}
-              <div className="relative">
-                <button
-                  onClick={() => setImportOpen(v => !v)}
-                  aria-label="Import photos"
-                  className="w-9 h-9 flex items-center justify-center rounded-[10px] transition-opacity hover:opacity-70"
-                  style={{ background: 'var(--bg-alt)', border: '1px solid var(--border)', color: 'var(--fg-secondary)' }}
-                >
-                  <Upload size={15} />
-                </button>
-
+              {/* Upload button + loading indicator */}
+              <div className="flex items-center gap-2">
                 <AnimatePresence>
-                  {importOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setImportOpen(false)} />
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.94 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.94 }}
-                        transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-                        className="absolute right-0 top-14 z-20 rounded-2xl p-4"
-                        style={{
-                          background: 'var(--bg)',
-                          border: '1px solid var(--border)',
-                          boxShadow: '0 16px 48px rgba(0,0,0,0.16)',
-                        }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <ImportPopup onImported={() => { fetchPhotos(); setImportOpen(false); }} />
-                      </motion.div>
-                    </>
+                  {uploading && (
+                    <motion.span
+                      initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 6 }}
+                      transition={{ duration: 0.2 }}
+                      className="text-xs font-display"
+                      style={{ color: 'var(--fg-secondary)' }}
+                    >
+                      Uploading…
+                    </motion.span>
                   )}
                 </AnimatePresence>
+                <OriginUploadButton onFiles={uploadFiles} />
               </div>
             </div>
 
             {filteredPhotos.length === 0 ? (
-              <p className="text-sm" style={{ color: 'var(--fg-tertiary)' }}>No photos match that date.</p>
+              <p className="text-sm" style={{ color: 'var(--fg-secondary)' }}>No photos match that date.</p>
             ) : (
               <div className="flex flex-wrap gap-6 justify-start">
                 {filteredPhotos.map((photo) => (
@@ -469,27 +486,31 @@ export default function PhotosPage() {
                     style={{ overflow: 'hidden' }}
                   >
                     <div style={{ padding: '12px 4px 16px' }}>
-                      <p style={{ fontSize: 10, color: '#aaa', marginBottom: 8, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                      <p style={{ fontSize: 10, color: 'var(--fg-secondary)', marginBottom: 8, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                         {formatDate(selected.created_at)}
                       </p>
                       {selected.fingerprint && (
                         <>
                           <div className="flex flex-wrap gap-1.5 mb-2.5">
-                            <span className="text-xs px-2.5 py-0.5 font-semibold" style={{ background: '#1D1D1F', color: '#fff', fontSize: 11 }}>
+                            <span className="text-xs px-2.5 py-0.5 font-semibold" style={{ background: 'var(--fg)', color: 'var(--bg)', fontSize: 11 }}>
                               {selected.fingerprint.mood}
                             </span>
                             {selected.fingerprint.emotions.slice(0, 3).map(e => (
-                              <span key={e} className="text-xs px-2.5 py-0.5" style={{ background: '#f0f0f0', color: '#555', fontSize: 11 }}>
+                              <span key={e} className="text-xs px-2.5 py-0.5" style={{ background: 'var(--border)', color: 'var(--fg-secondary)', fontSize: 11 }}>
                                 {e}
                               </span>
                             ))}
                           </div>
-                          <p style={{ fontSize: 12, lineHeight: 1.6, color: '#3D2B1F' }}>{selected.fingerprint.caption}</p>
+                          <p style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--fg)' }}>{selected.fingerprint.caption}</p>
                         </>
                       )}
-                      <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                        <button onClick={() => setSelected(null)} className="flex items-center gap-1" style={{ color: '#999', fontSize: 11 }}>
-                          <X size={11} /> close
+                      <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                        <button onClick={() => setSelected(null)}
+                          className="group flex items-center gap-1 transition-opacity hover:opacity-60 outline-none"
+                          style={{ color: 'var(--fg-secondary)' }}>
+                          <X size={11} />
+                          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[3rem]"
+                            style={{ fontSize: 11 }}>Close</span>
                         </button>
                         <div className="flex items-center gap-2">
                           <button
@@ -506,14 +527,14 @@ export default function PhotosPage() {
                               setSelected(null);
                             }}
                             className="w-8 h-8 rounded-md flex items-center justify-center transition-opacity hover:opacity-70"
-                            style={{ background: 'rgba(0,0,0,0.07)', color: '#1D1D1F' }}
+                            style={{ background: 'var(--bg-alt)', color: 'var(--fg)' }}
                           >
                             <Pencil size={12} />
                           </button>
                           <button
                             onClick={() => { setCropping(selected); setSelected(null); }}
                             className="w-8 h-8 rounded-md flex items-center justify-center transition-opacity hover:opacity-70"
-                            style={{ background: 'rgba(0,0,0,0.07)', color: '#1D1D1F' }}
+                            style={{ background: 'var(--bg-alt)', color: 'var(--fg)' }}
                           >
                             <Crop size={12} />
                           </button>
@@ -547,7 +568,7 @@ export default function PhotosPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center"
             style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)' }}
-            onClick={() => setEditing(null)}
+            onClick={() => { setSelected(editing); setEditing(null); }}
           >
             <motion.div
               initial={{ scale: 0.92, opacity: 0 }}
@@ -555,44 +576,44 @@ export default function PhotosPage() {
               exit={{ scale: 0.92, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 300, damping: 28 }}
               onClick={e => e.stopPropagation()}
-              style={{ width: 320, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 40px 100px rgba(0,0,0,0.5)' }}
+              style={{ width: 320, background: 'var(--bg)', borderRadius: 12, padding: 20, boxShadow: '0 40px 100px rgba(0,0,0,0.5)' }}
             >
-              <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: '#aaa' }}>Edit photo</p>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: 'var(--fg-secondary)' }}>Edit photo</p>
 
               <div className="flex flex-col gap-4">
                 {/* Date — same style as DateSearch */}
                 <div>
-                  <label className="text-xs mb-1.5 block" style={{ color: '#999' }}>Date</label>
-                  <div className="flex items-center gap-1 px-3 rounded-[10px]" style={{ border: '1px solid #e0e0e0', background: '#f5f5f5', height: 34 }}>
+                  <label className="text-xs mb-1.5 block" style={{ color: 'var(--fg-secondary)' }}>Date</label>
+                  <div className="flex items-center gap-1 px-3 rounded-[10px]" style={{ border: '1px solid var(--border)', background: 'var(--bg-alt)', height: 34 }}>
                     <input ref={editMoRef} type="text" placeholder="MM" maxLength={2} value={editMonth}
                       onChange={e => { const v = e.target.value.replace(/\D/g,''); setEditMonth(v); if (v.length === 2) { editDyRef.current?.focus(); editDyRef.current?.select(); } }}
                       onKeyDown={e => { if (e.key==='ArrowRight') { e.preventDefault(); editDyRef.current?.focus(); } }}
                       className="tabular-nums border-none outline-none bg-transparent w-8 text-center"
-                      style={{ fontSize: 13, color: '#1D1D1F' }} />
-                    <span style={{ color: '#ccc', fontSize: 13 }}>/</span>
+                      style={{ fontSize: 13, color: 'var(--fg)' }} />
+                    <span style={{ color: 'var(--fg-secondary)', fontSize: 13 }}>/</span>
                     <input ref={editDyRef} type="text" placeholder="DD" maxLength={2} value={editDay}
                       onChange={e => { const v = e.target.value.replace(/\D/g,''); setEditDay(v); if (v.length === 2) { editYrRef.current?.focus(); editYrRef.current?.select(); } }}
                       onKeyDown={e => { if (e.key==='ArrowRight') { e.preventDefault(); editYrRef.current?.focus(); } if (e.key==='ArrowLeft') { e.preventDefault(); editMoRef.current?.focus(); } if (e.key==='Backspace' && e.currentTarget.value==='') { e.preventDefault(); editMoRef.current?.focus(); } }}
                       className="tabular-nums border-none outline-none bg-transparent w-8 text-center"
-                      style={{ fontSize: 13, color: '#1D1D1F' }} />
-                    <span style={{ color: '#ccc', fontSize: 13 }}>/</span>
+                      style={{ fontSize: 13, color: 'var(--fg)' }} />
+                    <span style={{ color: 'var(--fg-secondary)', fontSize: 13 }}>/</span>
                     <input ref={editYrRef} type="text" placeholder="YYYY" maxLength={4} value={editYear}
                       onChange={e => setEditYear(e.target.value.replace(/\D/g,''))}
                       onKeyDown={e => { if (e.key==='ArrowLeft') { e.preventDefault(); editDyRef.current?.focus(); } if (e.key==='Backspace' && e.currentTarget.value==='') { e.preventDefault(); editDyRef.current?.focus(); } }}
                       className="tabular-nums border-none outline-none bg-transparent w-12 text-center"
-                      style={{ fontSize: 13, color: '#1D1D1F' }} />
+                      style={{ fontSize: 13, color: 'var(--fg)' }} />
                   </div>
                 </div>
 
                 {/* Tags — mood (black, first) + emotions (gray) */}
                 <div>
-                  <label className="text-xs mb-1.5 block" style={{ color: '#999' }}>
+                  <label className="text-xs mb-1.5 block" style={{ color: 'var(--fg-secondary)' }}>
                     Words <span style={{ fontWeight: 400 }}>— first tag is mood (black), rest are emotions (gray)</span>
                   </label>
-                  <div className="flex flex-wrap gap-1.5 p-2 rounded-[10px] min-h-[38px]" style={{ border: '1px solid #e0e0e0', background: '#f5f5f5' }}>
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-[10px] min-h-[38px]" style={{ border: '1px solid var(--border)', background: 'var(--bg-alt)' }}>
                     {editTags.map((tag, i) => (
                       <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
-                        style={{ background: i === 0 ? '#1D1D1F' : '#e0e0e0', color: i === 0 ? '#fff' : '#555', fontSize: 11 }}>
+                        style={{ background: i === 0 ? 'var(--fg)' : 'var(--border)', color: i === 0 ? 'var(--bg)' : 'var(--fg-secondary)', fontSize: 11 }}>
                         {tag}
                         <button onClick={() => setEditTags(prev => prev.filter((_, j) => j !== i))}
                           className="hover:opacity-60 transition-opacity" style={{ lineHeight: 1 }}>
@@ -617,33 +638,33 @@ export default function PhotosPage() {
                         }
                       }}
                       className="border-none outline-none bg-transparent flex-1 min-w-[80px]"
-                      style={{ fontSize: 11, color: '#1D1D1F' }}
+                      style={{ fontSize: 11, color: 'var(--fg)' }}
                     />
                   </div>
                 </div>
 
                 {/* Caption */}
                 <div>
-                  <label className="text-xs mb-1.5 block" style={{ color: '#999' }}>Caption</label>
+                  <label className="text-xs mb-1.5 block" style={{ color: 'var(--fg-secondary)' }}>Caption</label>
                   <textarea
                     value={editCaption}
                     onChange={e => setEditCaption(e.target.value)}
                     rows={3}
                     className="w-full rounded-[10px] px-3 py-2 text-xs resize-none outline-none"
-                    style={{ background: '#f5f5f5', color: '#1D1D1F', border: '1px solid #e0e0e0', lineHeight: 1.6 }}
+                    style={{ background: 'var(--bg-alt)', color: 'var(--fg)', border: '1px solid var(--border)', lineHeight: 1.6 }}
                   />
                 </div>
               </div>
 
               {/* Save / Cancel — BackButton style */}
-              <div className="flex items-center justify-between mt-5 pt-4" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                {/* Cancel */}
-                <button onClick={() => setEditing(null)}
+              <div className="flex items-center justify-between mt-5 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                {/* Cancel — goes back to photo card */}
+                <button onClick={() => { setSelected(editing); setEditing(null); }}
                   className="group flex items-center gap-1 transition-opacity hover:opacity-60 outline-none"
-                  style={{ color: '#1D1D1F', fontSize: 13 }}>
-                  <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[3rem]"
-                    style={{ fontSize: 11, color: '#999' }}>Cancel</span>
-                  <X size={13} />
+                  style={{ color: 'var(--fg-secondary)' }}>
+                  <X size={11} />
+                  <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[4rem]"
+                    style={{ fontSize: 11 }}>Cancel</span>
                 </button>
                 {/* Save */}
                 <button
@@ -653,23 +674,25 @@ export default function PhotosPage() {
                     const [mood, ...emotions] = editTags;
                     const updatedFingerprint = { ...editing.fingerprint, mood: mood ?? '', emotions, caption: editCaption };
                     const created_at = editMonth && editDay && editYear
-                      ? new Date(`${editYear}-${editMonth.padStart(2,'0')}-${editDay.padStart(2,'0')}`).toISOString()
+                      ? new Date(parseInt(editYear), parseInt(editMonth) - 1, parseInt(editDay), 12, 0, 0).toISOString()
                       : editing.created_at;
                     await fetch('/api/photos', {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ id: editing.id, fingerprint: updatedFingerprint, created_at }),
                     });
-                    setPhotos(prev => prev.map(p => p.id === editing.id ? { ...p, fingerprint: updatedFingerprint, created_at } : p));
+                    const updated = { ...editing, fingerprint: updatedFingerprint, created_at };
+                    setPhotos(prev => prev.map(p => p.id === editing.id ? updated : p));
                     setEditSaving(false);
                     setEditing(null);
+                    setSelected(updated);
                   }}
                   disabled={editSaving}
                   className="group flex items-center gap-1 transition-opacity hover:opacity-60 outline-none"
-                  style={{ color: '#1D1D1F', fontSize: 13 }}>
-                  <Check size={13} />
+                  style={{ color: 'var(--fg-secondary)' }}>
+                  <Check size={11} />
                   <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all duration-200 group-hover:max-w-[3rem]"
-                    style={{ fontSize: 11, color: '#999' }}>{editSaving ? 'Saving…' : 'Save'}</span>
+                    style={{ fontSize: 11 }}>{editSaving ? 'Saving…' : 'Save'}</span>
                 </button>
               </div>
             </motion.div>
@@ -685,8 +708,8 @@ export default function PhotosPage() {
             photoId={cropping.id}
             src={cropping.storage_path}
             onClose={() => setCropping(null)}
-            onDelete={() => { handleDelete(cropping.id); setCropping(null); }}
-            onSave={() => setCropVersions(v => ({ ...v, [cropping.id]: (v[cropping.id] ?? 0) + 1 }))}
+            onCancel={() => { setSelected(cropping); setCropping(null); }}
+            onSave={() => { setCropVersions(v => ({ ...v, [cropping.id]: (v[cropping.id] ?? 0) + 1 })); setSelected(cropping); setCropping(null); }}
           />
         )}
       </AnimatePresence>

@@ -21,38 +21,6 @@ async function getPhotoCount() {
 export default async function CalendarPage() {
   const [daylists, photoCount] = await Promise.all([getDaylists(), getPhotoCount()]);
 
-  const entryMap: Record<string, { id: string; title: string }> = {};
-  for (const d of daylists) {
-    const key = d.created_at.slice(0, 10);
-    if (!entryMap[key]) entryMap[key] = { id: d.id, title: d.title };
-  }
-
-  const sortedKeys = Object.keys(entryMap).sort();
-
-  // Current streak
-  const today = new Date();
-  let streak = 0;
-  const cur = new Date(today);
-  while (true) {
-    const k = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
-    if (!entryMap[k]) break;
-    streak++;
-    cur.setDate(cur.getDate() - 1);
-  }
-
-  // Longest streak
-  let longestStreak = 0;
-  let runStreak = 0;
-  let prevDate: Date | null = null;
-  for (const k of sortedKeys) {
-    const d = new Date(k);
-    if (prevDate) {
-      const diff = (d.getTime() - prevDate.getTime()) / 86400000;
-      if (diff === 1) { runStreak++; } else { runStreak = 1; }
-    } else { runStreak = 1; }
-    longestStreak = Math.max(longestStreak, runStreak);
-    prevDate = d;
-  }
 
   return (
     <main className="min-h-screen" style={{ background: 'var(--bg)' }}>
@@ -64,13 +32,8 @@ export default async function CalendarPage() {
       </nav>
       <div className="max-w-xl mx-auto px-6 pt-8 pb-28">
         <CalendarView
-          entryMap={entryMap}
-          stats={{
-            streak,
-            longestStreak,
-            totalEntries: sortedKeys.length,
-            totalPhotos: photoCount,
-          }}
+          daylists={daylists}
+          totalPhotos={photoCount}
         />
       </div>
     </main>

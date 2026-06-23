@@ -9,7 +9,7 @@ import { MagnifierProvider } from "@/components/MagnifierContext";
 import { NavigationProgress } from "@/components/NavigationProgress";
 
 export const metadata: Metadata = {
-  title: "Daily Diary",
+  title: "back[shot]",
   description: "Your personal daily diary with AI-powered photo insights",
 };
 
